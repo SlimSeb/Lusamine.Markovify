@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>latest</LangVersion>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    </PropertyGroup>
+
+    <!-- NuGet package metadata -->
+    <PropertyGroup>
+        <PackageId>Lusamine.Markovify</PackageId>
+        <Version>1.0.0</Version>
+        <Authors>Slimane Fakani</Authors>
+        <Description>A markovify-style Markov chain text generator for .NET. Train a model from a text corpus and generate new sentences, with weighted sampling, rejection sampling to avoid verbatim reproduction, model combining, and JSON serialization.</Description>
+        <PackageTags>markov;markov-chain;text-generation;nlp;markovify</PackageTags>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <RepositoryType>git</RepositoryType>
+        <PackageProjectUrl>https://github.com/slimfakani/Lusamine.Markovify</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/slimfakani/Lusamine.Markovify</RepositoryUrl>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="../README.md" Pack="true" PackagePath="\" />
+    </ItemGroup>
+
+</Project>
