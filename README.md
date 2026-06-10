@@ -17,12 +17,6 @@ Targets **.NET 10**. No third-party dependencies.
 dotnet add package Lusamine.Markovify
 ```
 
-Or reference the project directly:
-
-```bash
-dotnet add reference path/to/Lusamine.Markovify/Lusamine.Markovify.csproj
-```
-
 ## Quick start
 
 ```csharp

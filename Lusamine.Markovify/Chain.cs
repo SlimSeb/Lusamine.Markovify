@@ -19,10 +19,34 @@ public sealed class Chain
     private readonly Dictionary<State, Dictionary<string, int>> _model;
 
     // Lazily-built sampling tables: state -> (followers, cumulative weights).
-    private readonly Dictionary<State, (string[] Choices, int[] CumDist)> _cache = new();
+    private readonly Dictionary<State, (string[] Choices, double[] CumDist)> _cache = new();
+
+    private double _temperature = 1.0;
 
     /// <summary>The number of words that make up each state.</summary>
     public int StateSize { get; }
+
+    /// <summary>
+    /// Sampling temperature applied when walking the chain. <c>1.0</c> (the default)
+    /// reproduces the trained distribution. Values greater than <c>1.0</c> flatten it,
+    /// making rarer followers more likely and reducing verbatim reproduction of the
+    /// source. Values in <c>(0, 1)</c> sharpen it toward the most common follower.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is not greater than zero.</exception>
+    public double Temperature
+    {
+        get => _temperature;
+        set
+        {
+            if (value <= 0)
+                throw new ArgumentOutOfRangeException(nameof(value), "Temperature must be greater than zero.");
+            if (value.Equals(_temperature))
+                return;
+            _temperature = value;
+            // Cached cumulative weights depend on the temperature; force a rebuild.
+            _cache.Clear();
+        }
+    }
 
     /// <summary>The raw transition model: state -> (follower -> count).</summary>
     public IReadOnlyDictionary<State, Dictionary<string, int>> Model => _model;
@@ -95,13 +119,15 @@ public sealed class Chain
                 throw new KeyNotFoundException($"State {state} is not present in the model.");
 
             var choices = new string[followers.Count];
-            var cumDist = new int[followers.Count];
-            var sum = 0;
+            var cumDist = new double[followers.Count];
+            var sum = 0.0;
             var index = 0;
             foreach (var (word, count) in followers)
             {
                 choices[index] = word;
-                sum += count;
+                // At T == 1 the weight is exactly the observed count; otherwise it is
+                // count^(1/T), which flattens (T > 1) or sharpens (T < 1) the distribution.
+                sum += _temperature.Equals(1.0) ? count : Math.Pow(count, 1.0 / _temperature);
                 cumDist[index] = sum;
                 index++;
             }
@@ -111,7 +137,7 @@ public sealed class Chain
         }
 
         var total = entry.CumDist[^1];
-        var roll = rng.Next(total);
+        var roll = rng.NextDouble() * total;
         var pick = BisectRight(entry.CumDist, roll);
         return entry.Choices[pick];
     }
@@ -237,7 +263,7 @@ public sealed class Chain
     }
 
     // bisect.bisect_right: index of the first element strictly greater than value.
-    private static int BisectRight(int[] sortedCumulative, int value)
+    private static int BisectRight(double[] sortedCumulative, double value)
     {
         var low = 0;
         var high = sortedCumulative.Length;

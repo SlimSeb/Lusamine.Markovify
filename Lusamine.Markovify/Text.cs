@@ -41,10 +41,22 @@ public class Text
     /// rejection-tested for excessive overlap with the original.
     /// </param>
     /// <param name="rng">Random source; defaults to <see cref="Random.Shared"/>.</param>
-    public Text(string inputText, int stateSize = 2, bool retainOriginal = true, Random? rng = null)
-        : this(ParseSentencesStatic(inputText), stateSize, retainOriginal, rng,
+    /// <param name="normalize">
+    /// When <c>true</c>, each word is lowercased and stripped of non-alphanumeric
+    /// characters before training, so tokens like <c>"Hello,"</c> and <c>"hello"</c>
+    /// are treated as the same word.
+    /// </param>
+    /// <param name="temperature">
+    /// Sampling temperature for generation. <c>1.0</c> (default) reproduces the
+    /// trained distribution; values greater than <c>1.0</c> reduce verbatim copying
+    /// of the source by favoring rarer transitions. See <see cref="Chain.Temperature"/>.
+    /// </param>
+    public Text(string inputText, int stateSize = 2, bool retainOriginal = true, Random? rng = null,
+        bool normalize = false, double temperature = 1.0)
+        : this(ParseSentencesStatic(inputText, normalize), stateSize, retainOriginal, rng,
             chain: null, sentenceSplitterUsed: true)
     {
+        Chain.Temperature = temperature;
     }
 
     /// <summary>
@@ -71,19 +83,21 @@ public class Text
                 builder.Append(WordJoin(sentence));
                 builder.Append(' ');
             }
+
             _rejoinedText = builder.ToString();
         }
     }
 
-    private static IReadOnlyList<IReadOnlyList<string>> ParseSentencesStatic(string inputText)
+    private static IReadOnlyList<IReadOnlyList<string>> ParseSentencesStatic(string inputText, bool normalize = false)
     {
         var sentences = new List<IReadOnlyList<string>>();
         foreach (var sentence in Splitters.SplitIntoSentences(inputText))
         {
-            var words = Splitters.SplitIntoWords(sentence);
+            var words = Splitters.SplitIntoWords(sentence, normalize);
             if (words.Count > 0)
                 sentences.Add(words);
         }
+
         return sentences;
     }
 
@@ -231,9 +245,11 @@ public class Text
                             break;
                         }
                     }
+
                     if (matches)
                         initStates.Add(state);
                 }
+
                 Shuffle(initStates);
             }
         }
@@ -300,6 +316,7 @@ public class Text
             writer.WriteRawValue(Chain.ToJson());
             writer.WriteEndObject();
         }
+
         return Encoding.UTF8.GetString(stream.ToArray());
     }
 
@@ -339,6 +356,7 @@ public class Text
                 retain = false;
                 break;
             }
+
             allParsed.AddRange(model.ParsedSentences);
         }
 
