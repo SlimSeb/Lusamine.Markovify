@@ -36,7 +36,9 @@ Console.WriteLine($"  {model.MakeShortSentence(maxChars: 80, tries: 50) ?? "(non
 Console.WriteLine("\n-- A sentence starting with \"The\" --");
 Console.WriteLine($"  {model.MakeSentenceWithStart("The", strict: false) ?? "(none)"}");
 
-// Persist and reload the trained model.
+// Persist and reload the trained model. ToJson/FromJson go through a single
+// string, which is handy for small models; for huge corpora use Save/Load or
+// WriteTo (shown below), which stream and avoid .NET's ~1 GB string limit.
 Console.WriteLine("\n-- Round-tripping the model through JSON --");
 var json = model.ToJson();
 Console.WriteLine($"  serialized {json.Length} characters of model data");

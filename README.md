@@ -168,13 +168,25 @@ await model.SaveAsync("model.json");
 var loaded = await Text.LoadAsync("model.json");
 ```
 
-Or work with the JSON yourself:
+`Save`/`Load` (and their async variants) stream JSON directly to and from the
+file, so they handle models trained on huge corpora that would not fit in a
+single `string`. **Prefer them for large models.**
+
+For full control, write to or read from any destination with `WriteTo`:
 
 ```csharp
-string json = model.ToJson();
-File.WriteAllText("model.json", json);
+using var stream = File.Create("model.json");
+using var writer = new System.Text.Json.Utf8JsonWriter(stream);
+model.WriteTo(writer);   // also available on Chain
+```
 
-var reloaded = Text.FromJson(File.ReadAllText("model.json"));
+`ToJson` / `FromJson` round-trip through a single `string` for convenience, which
+is fine for small models but hits .NET's ~1 GB-character limit on very large
+ones (it throws `OverflowException`). Use `Save` / `Load` or `WriteTo` for those:
+
+```csharp
+string json = model.ToJson();           // small models only
+var reloaded = Text.FromJson(json);
 ```
 
 > Serialization stores the chain, state size, and sampling temperature, not the original corpus, so a
@@ -225,9 +237,9 @@ parsed sentences to the protected constructor.
 | `Splitters` | Default sentence- and word-splitting helpers. |
 
 Key `Text` members: `MakeSentence`, `MakeShortSentence`,
-`MakeSentenceWithStart`, `FromSentences`, `Save` / `Load`, `ToJson` / `FromJson`,
+`MakeSentenceWithStart`, `FromSentences`, `Save` / `Load`, `WriteTo`, `ToJson` / `FromJson`,
 `Combine`, `Chain`, `ParsedSentences`. Key `Chain` members: `Build`, `Walk`, `Combine`,
-`Temperature`, `ToJson` / `FromJson`.
+`Temperature`, `WriteTo`, `ToJson` / `FromJson`.
 
 ## Project layout
 
