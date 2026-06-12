@@ -203,42 +203,57 @@ public sealed class Chain
     }
 
     /// <summary>Serializes the transition model to JSON.</summary>
+    /// <remarks>
+    /// Materializes the whole model as a single <see cref="string"/>; for very large
+    /// corpora this can exceed the maximum string length. Use <see cref="WriteTo"/>
+    /// (or <see cref="Text.Save(string)"/>) to stream directly to a destination instead.
+    /// </remarks>
     public string ToJson()
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
-        {
-            writer.WriteStartArray();
-            foreach (var (state, followers) in _model)
-            {
-                writer.WriteStartArray();
-
-                writer.WriteStartArray();
-                foreach (var word in state.Words)
-                    writer.WriteStringValue(word);
-                writer.WriteEndArray();
-
-                writer.WriteStartObject();
-                foreach (var (word, count) in followers)
-                    writer.WriteNumber(word, count);
-                writer.WriteEndObject();
-
-                writer.WriteEndArray();
-            }
-            writer.WriteEndArray();
-        }
+            WriteTo(writer);
 
         return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    /// <summary>Writes the transition model to <paramref name="writer"/> as a JSON array.</summary>
+    public void WriteTo(Utf8JsonWriter writer)
+    {
+        writer.WriteStartArray();
+        foreach (var (state, followers) in _model)
+        {
+            writer.WriteStartArray();
+
+            writer.WriteStartArray();
+            foreach (var word in state.Words)
+                writer.WriteStringValue(word);
+            writer.WriteEndArray();
+
+            writer.WriteStartObject();
+            foreach (var (word, count) in followers)
+                writer.WriteNumber(word, count);
+            writer.WriteEndObject();
+
+            writer.WriteEndArray();
+        }
+        writer.WriteEndArray();
     }
 
     /// <summary>Reconstructs a chain previously produced by <see cref="ToJson"/>.</summary>
     public static Chain FromJson(string json)
     {
         using var document = JsonDocument.Parse(json);
+        return FromElement(document.RootElement);
+    }
+
+    /// <summary>Reconstructs a chain from an already-parsed JSON array element.</summary>
+    public static Chain FromElement(JsonElement root)
+    {
         var model = new Dictionary<State, Dictionary<string, int>>();
         var stateSize = -1;
 
-        foreach (var pair in document.RootElement.EnumerateArray())
+        foreach (var pair in root.EnumerateArray())
         {
             var stateElement = pair[0];
             var words = new string[stateElement.GetArrayLength()];
@@ -257,7 +272,7 @@ public sealed class Chain
         }
 
         if (stateSize == -1)
-            throw new ArgumentException("Serialized chain contained no states.", nameof(json));
+            throw new ArgumentException("Serialized chain contained no states.", nameof(root));
 
         return new Chain(model, stateSize);
     }

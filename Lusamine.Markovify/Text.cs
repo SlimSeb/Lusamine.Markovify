@@ -386,29 +386,42 @@ public class Text
     }
 
     /// <summary>Serializes the model (state size, sampling temperature, and chain) to JSON.</summary>
+    /// <remarks>
+    /// Materializes the whole model as a single <see cref="string"/>; for very large
+    /// corpora this can exceed the maximum string length. Prefer <see cref="Save(string)"/>,
+    /// which streams directly to disk.
+    /// </remarks>
     public string ToJson()
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
-        {
-            writer.WriteStartObject();
-            writer.WriteNumber("state_size", StateSize);
-            writer.WriteNumber("temperature", Chain.Temperature);
-            writer.WritePropertyName("chain");
-            writer.WriteRawValue(Chain.ToJson());
-            writer.WriteEndObject();
-        }
+            WriteTo(writer);
 
         return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    /// <summary>Writes the model to <paramref name="writer"/> as a JSON object.</summary>
+    public void WriteTo(Utf8JsonWriter writer)
+    {
+        writer.WriteStartObject();
+        writer.WriteNumber("state_size", StateSize);
+        writer.WriteNumber("temperature", Chain.Temperature);
+        writer.WritePropertyName("chain");
+        Chain.WriteTo(writer);
+        writer.WriteEndObject();
     }
 
     /// <summary>Reconstructs a model previously produced by <see cref="ToJson"/>.</summary>
     public static Text FromJson(string json, Random? rng = null)
     {
         using var document = JsonDocument.Parse(json);
-        var root = document.RootElement;
+        return FromElement(document.RootElement, rng);
+    }
+
+    private static Text FromElement(JsonElement root, Random? rng)
+    {
         var stateSize = root.GetProperty("state_size").GetInt32();
-        var chain = Chain.FromJson(root.GetProperty("chain").GetRawText());
+        var chain = Chain.FromElement(root.GetProperty("chain"));
         // Temperature was added in a later format version; default to 1.0 when absent.
         if (root.TryGetProperty("temperature", out var temperature))
             chain.Temperature = temperature.GetDouble();
@@ -422,19 +435,52 @@ public class Text
     }
 
     /// <summary>Saves the model to <paramref name="path"/> as JSON, overwriting any existing file.</summary>
-    public void Save(string path) => File.WriteAllText(path, ToJson());
+    /// <remarks>Streams directly to disk, so it handles models too large to hold in a single string.</remarks>
+    public void Save(string path)
+    {
+        using var stream = File.Create(path);
+        using var writer = new Utf8JsonWriter(stream);
+        WriteTo(writer);
+    }
 
     /// <summary>Saves the model to <paramref name="path"/> as JSON, overwriting any existing file.</summary>
+    /// <remarks>Streams directly to disk, so it handles models too large to hold in a single string.</remarks>
     public async Task SaveAsync(string path, CancellationToken cancellationToken = default)
-        => await File.WriteAllTextAsync(path, ToJson(), cancellationToken).ConfigureAwait(false);
+    {
+        var stream = File.Create(path);
+        await using (stream.ConfigureAwait(false))
+        {
+            var writer = new Utf8JsonWriter(stream);
+            await using (writer.ConfigureAwait(false))
+            {
+                WriteTo(writer);
+                await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
 
     /// <summary>Loads a model previously written by <see cref="Save"/>.</summary>
-    public static Text Load(string path, Random? rng = null) => FromJson(File.ReadAllText(path), rng);
+    /// <remarks>Parses directly from the file, so it handles models too large to hold in a single string.</remarks>
+    public static Text Load(string path, Random? rng = null)
+    {
+        using var stream = File.OpenRead(path);
+        using var document = JsonDocument.Parse(stream);
+        return FromElement(document.RootElement, rng);
+    }
 
     /// <summary>Loads a model previously written by <see cref="Save"/>.</summary>
+    /// <remarks>Parses directly from the file, so it handles models too large to hold in a single string.</remarks>
     public static async Task<Text> LoadAsync(string path, Random? rng = null,
         CancellationToken cancellationToken = default)
-        => FromJson(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false), rng);
+    {
+        var stream = File.OpenRead(path);
+        await using (stream.ConfigureAwait(false))
+        {
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            return FromElement(document.RootElement, rng);
+        }
+    }
 
     /// <summary>
     /// Combines several models into one by combining their chains. Retained source
