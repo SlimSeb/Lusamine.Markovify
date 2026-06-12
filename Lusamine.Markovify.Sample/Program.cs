@@ -43,6 +43,14 @@ Console.WriteLine($"  serialized {json.Length} characters of model data");
 var reloaded = Text.FromJson(json, new Random(7));
 Console.WriteLine($"  reloaded -> {reloaded.MakeSentence(testOutput: false)}");
 
+// Save the trained model to a file and load it back later.
+Console.WriteLine("\n-- Saving and loading the model from a file --");
+var modelPath = Path.Combine(Path.GetTempPath(), "lusamine-sample-model.json");
+model.Save(modelPath);
+Console.WriteLine($"  saved model to {modelPath}");
+var loaded = Text.Load(modelPath, new Random(7));
+Console.WriteLine($"  loaded -> {loaded.MakeSentence(testOutput: false)}");
+
 // Combine two models into one.
 Console.WriteLine("\n-- Combining two models --");
 var weather = new Text("The storm rolled in fast. Thunder shook the windows all night.", rng: new Random(1));

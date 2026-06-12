@@ -137,6 +137,20 @@ var blended = Text.Combine([a, b], [1.0, 2.0]);
 
 ## Saving and loading
 
+Save and load straight to a file:
+
+```csharp
+model.Save("model.json");
+
+var reloaded = Text.Load("model.json");
+
+// Async variants are available too:
+await model.SaveAsync("model.json");
+var loaded = await Text.LoadAsync("model.json");
+```
+
+Or work with the JSON yourself:
+
 ```csharp
 string json = model.ToJson();
 File.WriteAllText("model.json", json);
@@ -144,7 +158,7 @@ File.WriteAllText("model.json", json);
 var reloaded = Text.FromJson(File.ReadAllText("model.json"));
 ```
 
-> Serialization stores the chain and state size, not the original corpus, so a
+> Serialization stores the chain, state size, and sampling temperature, not the original corpus, so a
 > reloaded model cannot rejection-test against the source. Call generation
 > methods with `testOutput: false` on reloaded models, or retrain to restore it.
 
@@ -192,8 +206,8 @@ parsed sentences to the protected constructor.
 | `Splitters` | Default sentence- and word-splitting helpers. |
 
 Key `Text` members: `MakeSentence`, `MakeShortSentence`,
-`MakeSentenceWithStart`, `ToJson` / `FromJson`, `Combine`, `Chain`,
-`ParsedSentences`. Key `Chain` members: `Build`, `Walk`, `Combine`,
+`MakeSentenceWithStart`, `Save` / `Load`, `ToJson` / `FromJson`, `Combine`,
+`Chain`, `ParsedSentences`. Key `Chain` members: `Build`, `Walk`, `Combine`,
 `Temperature`, `ToJson` / `FromJson`.
 
 ## Project layout

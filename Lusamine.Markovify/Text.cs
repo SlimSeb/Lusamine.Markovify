@@ -304,7 +304,7 @@ public class Text
         return true;
     }
 
-    /// <summary>Serializes the model (state size + chain) to JSON.</summary>
+    /// <summary>Serializes the model (state size, sampling temperature, and chain) to JSON.</summary>
     public string ToJson()
     {
         using var stream = new MemoryStream();
@@ -312,6 +312,7 @@ public class Text
         {
             writer.WriteStartObject();
             writer.WriteNumber("state_size", StateSize);
+            writer.WriteNumber("temperature", Chain.Temperature);
             writer.WritePropertyName("chain");
             writer.WriteRawValue(Chain.ToJson());
             writer.WriteEndObject();
@@ -327,6 +328,9 @@ public class Text
         var root = document.RootElement;
         var stateSize = root.GetProperty("state_size").GetInt32();
         var chain = Chain.FromJson(root.GetProperty("chain").GetRawText());
+        // Temperature was added in a later format version; default to 1.0 when absent.
+        if (root.TryGetProperty("temperature", out var temperature))
+            chain.Temperature = temperature.GetDouble();
         return new Text(
             Array.Empty<IReadOnlyList<string>>(),
             stateSize,
@@ -335,6 +339,21 @@ public class Text
             chain,
             sentenceSplitterUsed: true);
     }
+
+    /// <summary>Saves the model to <paramref name="path"/> as JSON, overwriting any existing file.</summary>
+    public void Save(string path) => File.WriteAllText(path, ToJson());
+
+    /// <summary>Saves the model to <paramref name="path"/> as JSON, overwriting any existing file.</summary>
+    public async Task SaveAsync(string path, CancellationToken cancellationToken = default)
+        => await File.WriteAllTextAsync(path, ToJson(), cancellationToken).ConfigureAwait(false);
+
+    /// <summary>Loads a model previously written by <see cref="Save"/>.</summary>
+    public static Text Load(string path, Random? rng = null) => FromJson(File.ReadAllText(path), rng);
+
+    /// <summary>Loads a model previously written by <see cref="Save"/>.</summary>
+    public static async Task<Text> LoadAsync(string path, Random? rng = null,
+        CancellationToken cancellationToken = default)
+        => FromJson(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false), rng);
 
     /// <summary>
     /// Combines several models into one by combining their chains. Retained source

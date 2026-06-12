@@ -116,6 +116,57 @@ public class TextTests
     }
 
     [Fact]
+    public void ToJson_FromJson_PreservesTemperature()
+    {
+        var model = new Text(Corpus, stateSize: 2, rng: new Random(8), temperature: 1.7);
+
+        var restored = Text.FromJson(model.ToJson());
+
+        Assert.Equal(1.7, restored.Chain.Temperature);
+    }
+
+    [Fact]
+    public void Save_Load_RoundTripsThroughAFile()
+    {
+        var model = new Text(Corpus, stateSize: 2, rng: new Random(8), temperature: 1.5);
+        var path = Path.Combine(Path.GetTempPath(), $"markovify-{Guid.NewGuid():N}.json");
+
+        try
+        {
+            model.Save(path);
+            var restored = Text.Load(path, new Random(8));
+
+            Assert.Equal(model.StateSize, restored.StateSize);
+            Assert.Equal(model.Chain.Temperature, restored.Chain.Temperature);
+            Assert.NotNull(restored.MakeSentence(testOutput: false));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task SaveAsync_LoadAsync_RoundTripsThroughAFile()
+    {
+        var model = new Text(Corpus, stateSize: 2, rng: new Random(8));
+        var path = Path.Combine(Path.GetTempPath(), $"markovify-{Guid.NewGuid():N}.json");
+
+        try
+        {
+            await model.SaveAsync(path);
+            var restored = await Text.LoadAsync(path, new Random(8));
+
+            Assert.Equal(model.StateSize, restored.StateSize);
+            Assert.NotNull(restored.MakeSentence(testOutput: false));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void Combine_MergesVocabularyFromBothModels()
     {
         var a = new Text("Alpha beta gamma delta epsilon.", stateSize: 2, rng: new Random(1));
