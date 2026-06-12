@@ -167,6 +167,108 @@ public class TextTests
     }
 
     [Fact]
+    public void RetainedSource_IsChunkedAndStillDetectsOverlapAcrossBoundaries()
+    {
+        // Force tiny chunks so the retained source is split into many pieces, then confirm
+        // a sentence copied verbatim from the source is still rejected even though the
+        // matching text may straddle a chunk boundary.
+        var savedLimit = Text.RejoinedChunkLimit;
+        var savedOverlap = Text.RejoinedChunkOverlap;
+        Text.RejoinedChunkLimit = 64;
+        Text.RejoinedChunkOverlap = 16;
+        try
+        {
+            var model = new Text("The cat sat on the mat.", stateSize: 2, rng: new Random(3));
+
+            // The only possible walk reproduces the source, so the overlap test must reject it.
+            Assert.Null(model.MakeSentence(testOutput: true));
+            Assert.NotNull(model.MakeSentence(testOutput: false));
+        }
+        finally
+        {
+            Text.RejoinedChunkLimit = savedLimit;
+            Text.RejoinedChunkOverlap = savedOverlap;
+        }
+    }
+
+    [Fact]
+    public void Construction_DoesNotRejoinTheCorpusIntoOneGiantString()
+    {
+        // Many sentences with a tiny chunk limit exercises the chunking path used to keep
+        // huge corpora from overflowing .NET's maximum string length during construction.
+        var savedLimit = Text.RejoinedChunkLimit;
+        Text.RejoinedChunkLimit = 32;
+        try
+        {
+            var builder = new System.Text.StringBuilder();
+            for (var i = 0; i < 200; i++)
+                builder.Append("Word").Append(i).Append(" alpha beta gamma. ");
+
+            var model = new Text(builder.ToString(), stateSize: 2, rng: new Random(7));
+
+            Assert.NotNull(model.ParsedSentences);
+            Assert.NotNull(model.MakeSentence(testOutput: false));
+        }
+        finally
+        {
+            Text.RejoinedChunkLimit = savedLimit;
+        }
+    }
+
+    [Fact]
+    public void FromSentences_BuildsAModelThatGenerates()
+    {
+        var sentences = Corpus
+            .Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(s => Splitters.SplitIntoWords(s));
+
+        var model = Text.FromSentences(sentences, stateSize: 2, rng: new Random(8), temperature: 1.4);
+
+        Assert.Equal(2, model.StateSize);
+        Assert.Equal(1.4, model.Chain.Temperature);
+        Assert.NotNull(model.MakeSentence(testOutput: false));
+        // The source is not retained, so it generates with the overlap test off.
+        Assert.Null(model.ParsedSentences);
+    }
+
+    [Fact]
+    public void FromSentences_ConsumesTheSequenceLazilyAndOnce()
+    {
+        var enumerations = 0;
+
+        IEnumerable<IReadOnlyList<string>> Stream()
+        {
+            enumerations++;
+            foreach (var sentence in Corpus.Split('.', StringSplitOptions.RemoveEmptyEntries))
+                yield return Splitters.SplitIntoWords(sentence);
+        }
+
+        var model = Text.FromSentences(Stream(), stateSize: 2, rng: new Random(8));
+
+        // Building must walk the sequence exactly once; generation must not re-enumerate it.
+        model.MakeSentence(testOutput: false);
+        Assert.Equal(1, enumerations);
+    }
+
+    [Fact]
+    public void FromSentences_SkipsEmptySentences()
+    {
+        IReadOnlyList<IReadOnlyList<string>> sentences =
+        [
+            ["the", "cat", "sat"],
+            [],
+            ["the", "dog", "ran"],
+        ];
+
+        var model = Text.FromSentences(sentences, stateSize: 1, rng: new Random(1));
+
+        // The empty run must not create a degenerate BEGIN -> END state.
+        Assert.DoesNotContain(model.Chain.Model, kvp => kvp.Value.ContainsKey(Chain.End)
+            && kvp.Key.Words.All(w => w == Chain.Begin));
+        Assert.NotNull(model.MakeSentence(testOutput: false));
+    }
+
+    [Fact]
     public void Combine_MergesVocabularyFromBothModels()
     {
         var a = new Text("Alpha beta gamma delta epsilon.", stateSize: 2, rng: new Random(1));

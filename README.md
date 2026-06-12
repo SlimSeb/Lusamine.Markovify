@@ -135,6 +135,25 @@ var b = new Text(corpusB);
 var blended = Text.Combine([a, b], [1.0, 2.0]);
 ```
 
+## Huge corpora
+
+The string constructors require the whole corpus to fit in memory as one `string`
+(under .NET's ~1 GB-character limit). For a corpus larger than that, stream
+already-tokenized sentences into `Text.FromSentences`, which consumes the
+sequence lazily in a single pass and never holds more than one sentence at a
+time:
+
+```csharp
+var sentences = File.ReadLines("corpus.txt")          // streamed, one line at a time
+    .Select(line => Splitters.SplitIntoWords(line));
+
+var model = Text.FromSentences(sentences, stateSize: 2);
+model.Save("model.json");
+```
+
+The source is not retained, so generate with `testOutput: false` (the overlap
+test needs the original text, which streaming intentionally discards).
+
 ## Saving and loading
 
 Save and load straight to a file:
@@ -206,8 +225,8 @@ parsed sentences to the protected constructor.
 | `Splitters` | Default sentence- and word-splitting helpers. |
 
 Key `Text` members: `MakeSentence`, `MakeShortSentence`,
-`MakeSentenceWithStart`, `Save` / `Load`, `ToJson` / `FromJson`, `Combine`,
-`Chain`, `ParsedSentences`. Key `Chain` members: `Build`, `Walk`, `Combine`,
+`MakeSentenceWithStart`, `FromSentences`, `Save` / `Load`, `ToJson` / `FromJson`,
+`Combine`, `Chain`, `ParsedSentences`. Key `Chain` members: `Build`, `Walk`, `Combine`,
 `Temperature`, `ToJson` / `FromJson`.
 
 ## Project layout

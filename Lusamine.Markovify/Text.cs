@@ -19,8 +19,16 @@ public class Text
     /// <summary>Default maximum number of consecutive words that may overlap the source.</summary>
     public const int DefaultMaxOverlapTotal = 15;
 
+    // The retained source is held as bounded chunks rather than one contiguous string:
+    // a corpus large enough to exceed .NET's maximum string length would otherwise throw
+    // when rejoined. Consecutive chunks overlap by RejoinedChunkOverlap characters so an
+    // overlap gram that straddles a chunk boundary is still wholly contained in one chunk.
+    // These are mutable only so tests can force many small chunks without a huge corpus.
+    internal static int RejoinedChunkLimit = 64 * 1024 * 1024;
+    internal static int RejoinedChunkOverlap = 64 * 1024;
+
     private readonly Random _rng;
-    private readonly string? _rejoinedText;
+    private readonly IReadOnlyList<string>? _rejoinedChunks;
 
     /// <summary>The trained underlying chain.</summary>
     public Chain Chain { get; }
@@ -77,15 +85,50 @@ public class Text
         if (retainOriginal)
         {
             ParsedSentences = parsedSentences;
-            var builder = new StringBuilder();
-            foreach (var sentence in parsedSentences)
-            {
-                builder.Append(WordJoin(sentence));
-                builder.Append(' ');
-            }
-
-            _rejoinedText = builder.ToString();
+            _rejoinedChunks = BuildRejoinedChunks(parsedSentences);
         }
+    }
+
+    // Joins the source sentences back into space-separated text, split across chunks no
+    // larger than RejoinedChunkLimit. Each new chunk is seeded with the tail of the
+    // previous one so a gram spanning the cut is still found by RejoinedContains.
+    private IReadOnlyList<string> BuildRejoinedChunks(IReadOnlyList<IReadOnlyList<string>> parsedSentences)
+    {
+        var chunks = new List<string>();
+        var builder = new StringBuilder();
+        foreach (var sentence in parsedSentences)
+        {
+            builder.Append(WordJoin(sentence));
+            builder.Append(' ');
+
+            if (builder.Length >= RejoinedChunkLimit)
+            {
+                var chunk = builder.ToString();
+                chunks.Add(chunk);
+                builder.Clear();
+                var keep = Math.Min(RejoinedChunkOverlap, chunk.Length);
+                builder.Append(chunk, chunk.Length - keep, keep);
+            }
+        }
+
+        if (builder.Length > 0)
+            chunks.Add(builder.ToString());
+
+        return chunks;
+    }
+
+    // Whether the retained source contains the given text, searching each chunk.
+    private bool RejoinedContains(string value)
+    {
+        if (_rejoinedChunks == null)
+            return false;
+        foreach (var chunk in _rejoinedChunks)
+        {
+            if (chunk.Contains(value, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 
     private static IReadOnlyList<IReadOnlyList<string>> ParseSentencesStatic(string inputText, bool normalize = false)
@@ -99,6 +142,44 @@ public class Text
         }
 
         return sentences;
+    }
+
+    /// <summary>
+    /// Builds a model from a stream of already-tokenized sentences, consuming
+    /// <paramref name="sentences"/> in a single pass. This is the right entry point for a
+    /// corpus too large to hold in memory as one string: pass a lazily-evaluated sequence
+    /// (for example <c>File.ReadLines(path).Select(line =&gt; Splitters.SplitIntoWords(line))</c>)
+    /// and only one sentence is materialized at a time.
+    /// </summary>
+    /// <param name="sentences">The tokenized sentences to train on, evaluated lazily.</param>
+    /// <param name="stateSize">Number of words per state (the Markov order).</param>
+    /// <param name="rng">Random source; defaults to <see cref="Random.Shared"/>.</param>
+    /// <param name="temperature">
+    /// Sampling temperature for generation. See <see cref="Chain.Temperature"/>.
+    /// </param>
+    /// <remarks>
+    /// Because the source is streamed and never retained, the resulting model cannot
+    /// rejection-test generated sentences against the original. Call generation methods
+    /// with <c>testOutput: false</c>.
+    /// </remarks>
+    public static Text FromSentences(
+        IEnumerable<IReadOnlyList<string>> sentences,
+        int stateSize = 2,
+        Random? rng = null,
+        double temperature = 1.0)
+    {
+        // Drop empty runs so a blank line in the source doesn't create a degenerate state,
+        // matching how the string constructors filter tokenized sentences.
+        var nonEmpty = sentences.Where(s => s.Count > 0);
+        var chain = Chain.Build(nonEmpty, stateSize);
+        chain.Temperature = temperature;
+        return new Text(
+            Array.Empty<IReadOnlyList<string>>(),
+            stateSize,
+            retainOriginal: false,
+            rng,
+            chain,
+            sentenceSplitterUsed: true);
     }
 
     /// <summary>Splits a sentence into words. Override to customize tokenization.</summary>
@@ -149,7 +230,7 @@ public class Text
             if (minWords is { } min && words.Count < min)
                 continue;
 
-            if (testOutput && _rejoinedText != null)
+            if (testOutput && _rejoinedChunks != null)
             {
                 if (!TestSentenceOutput(words, maxOverlapTotal, maxOverlapRatio))
                     continue;
@@ -281,7 +362,7 @@ public class Text
     /// </summary>
     protected bool TestSentenceOutput(IReadOnlyList<string> words, int maxOverlapTotal, double maxOverlapRatio)
     {
-        if (_rejoinedText == null)
+        if (_rejoinedChunks == null)
             return true;
 
         var overlapRatio = (int)Math.Round(maxOverlapRatio * words.Count, MidpointRounding.AwayFromZero);
@@ -297,7 +378,7 @@ public class Text
                 gram[j] = words[i + j];
 
             var gramJoined = WordJoin(gram);
-            if (_rejoinedText.Contains(gramJoined, StringComparison.Ordinal))
+            if (RejoinedContains(gramJoined))
                 return false;
         }
 

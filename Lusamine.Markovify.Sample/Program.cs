@@ -57,6 +57,15 @@ var weather = new Text("The storm rolled in fast. Thunder shook the windows all 
 var combined = Text.Combine([model, weather], [1.0, 1.5], new Random(3));
 Console.WriteLine($"  {combined.MakeSentence(testOutput: false)}");
 
+// Train from a streamed sequence of tokenized sentences (for corpora too large
+// to hold as one string). Here the lines stand in for File.ReadLines(path).
+Console.WriteLine("\n-- Streaming a corpus through FromSentences --");
+var streamed = corpus
+    .Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    .Select(s => Splitters.SplitIntoWords(s));
+var streamModel = Text.FromSentences(streamed, stateSize: 2, rng: new Random(5));
+Console.WriteLine($"  {streamModel.MakeSentence(testOutput: false)}");
+
 Console.WriteLine("\n-- NewlineText (each line is its own sentence) --");
 const string lines = """
     roses are red
