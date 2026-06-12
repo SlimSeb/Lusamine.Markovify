@@ -2,8 +2,9 @@
 
 A [markovify](https://github.com/jsvine/markovify)-style Markov chain text generator for .NET. Train a model from a text corpus, then generate new sentences that resemble the source without copying it verbatim.
 
-- **Weighted sampling** : next-word choices are weighted by how often they were observed.
+- **Weighted sampling** : next-word choices are weighted by how often they were observed, with an optional **temperature** to flatten the distribution.
 - **Rejection sampling** : generated sentences that overlap the source too much are discarded.
+- **Normalization** : optionally lowercase and strip punctuation before training to merge equivalent tokens.
 - **Constrained generation** : limit by length, word count, or a required opening.
 - **Model combining** : blend several trained models with weights.
 - **JSON serialization** : persist and reload trained models.
@@ -75,6 +76,45 @@ is more likely to reproduce it verbatim); smaller values are more random.
 var loose  = new Text(corpus, stateSize: 1);
 var tight  = new Text(corpus, stateSize: 3);
 ```
+
+## Reducing verbatim reproduction
+
+Beyond state size and the rejection test, two options help the model produce
+text that copies the source less.
+
+### Normalization
+
+Pass `normalize: true` to lowercase each word and strip non-alphanumeric
+characters before training. Tokens like `"Hello,"` and `"hello"` then collapse
+into one, so each state has a richer set of followers (less deterministic, less
+sparse). Tokens that become empty after stripping are dropped.
+
+```csharp
+var model = new Text(corpus, stateSize: 2, normalize: true);
+```
+
+Note that normalization discards casing and punctuation, so generated sentences
+will be lowercased and unpunctuated.
+
+### Temperature
+
+`temperature` reshapes the sampling distribution. At `1.0` (the default) the
+trained counts are used as-is. Values **greater than 1.0** flatten the
+distribution, favoring rarer transitions and making the walk less likely to
+follow a single memorized path; values in `(0, 1)` sharpen it toward the most
+common follower.
+
+```csharp
+// Flatter sampling: less verbatim copying. Try 1.3-1.8; very high values
+// trend toward gibberish.
+var model = new Text(corpus, stateSize: 2, temperature: 1.5);
+
+// Also adjustable after construction (works on FromJson / Combine results too).
+model.Chain.Temperature = 2.0;
+```
+
+Because temperature makes the model *produce* less copied text, fewer
+generations get rejected by the overlap test, so generation yield improves.
 
 ## One sentence per line
 
@@ -153,7 +193,8 @@ parsed sentences to the protected constructor.
 
 Key `Text` members: `MakeSentence`, `MakeShortSentence`,
 `MakeSentenceWithStart`, `ToJson` / `FromJson`, `Combine`, `Chain`,
-`ParsedSentences`.
+`ParsedSentences`. Key `Chain` members: `Build`, `Walk`, `Combine`,
+`Temperature`, `ToJson` / `FromJson`.
 
 ## Project layout
 
