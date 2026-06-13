@@ -202,6 +202,48 @@ public sealed class Chain
         return new Chain(merged, stateSize);
     }
 
+    /// <summary>
+    /// Removes rare transitions: any follower observed fewer than <paramref name="minCount"/>
+    /// times is dropped, and any state left with no remaining followers is removed entirely.
+    /// The sampling cache is invalidated so subsequent walks reflect the pruned model.
+    /// </summary>
+    /// <param name="minCount">The minimum observed count a follower must have to be kept.</param>
+    /// <returns>The number of follower transitions removed.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="minCount"/> is less than 1.</exception>
+    /// <remarks>
+    /// Pruning can leave a surviving transition pointing at a state that was itself removed.
+    /// Walking into such a state throws <see cref="KeyNotFoundException"/>, which the
+    /// generation methods on <see cref="Text"/> already treat as a failed attempt.
+    /// </remarks>
+    public int Prune(int minCount)
+    {
+        if (minCount < 1)
+            throw new ArgumentOutOfRangeException(nameof(minCount), "Minimum count must be at least 1.");
+
+        var removed = 0;
+        var emptyStates = new List<State>();
+        foreach (var (state, followers) in _model)
+        {
+            var rare = followers.Where(pair => pair.Value < minCount).Select(pair => pair.Key).ToList();
+            foreach (var word in rare)
+            {
+                followers.Remove(word);
+                removed++;
+            }
+
+            if (followers.Count == 0)
+                emptyStates.Add(state);
+        }
+
+        foreach (var state in emptyStates)
+            _model.Remove(state);
+
+        if (removed > 0)
+            _cache.Clear();
+
+        return removed;
+    }
+
     /// <summary>Serializes the transition model to JSON.</summary>
     /// <remarks>
     /// Materializes the whole model as a single <see cref="string"/>; for very large

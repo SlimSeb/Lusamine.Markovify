@@ -622,6 +622,17 @@ public class Text
             sentenceSplitterUsed: true);
     }
 
+    /// <summary>
+    /// Prunes rare transitions from the underlying <see cref="Chain"/>: any follower
+    /// observed fewer than <paramref name="minCount"/> times is dropped, along with any
+    /// state left with no remaining followers. This shrinks the model and biases
+    /// generation toward more strongly attested transitions, at the cost of variety.
+    /// </summary>
+    /// <param name="minCount">The minimum observed count a transition must have to be kept.</param>
+    /// <returns>The number of transitions removed.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="minCount"/> is less than 1.</exception>
+    public int PruneRareTransitions(int minCount = 2) => Chain.Prune(minCount);
+
     private void Shuffle<T>(IList<T> list)
     {
         for (var i = list.Count - 1; i > 0; i--)
