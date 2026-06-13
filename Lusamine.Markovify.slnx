@@ -2,4 +2,5 @@
   <Project Path="Lusamine.Markovify/Lusamine.Markovify.csproj" />
   <Project Path="Lusamine.Markovify.Tests/Lusamine.Markovify.Tests.csproj" />
   <Project Path="Lusamine.Markovify.Sample/Lusamine.Markovify.Sample.csproj" />
+  <Project Path="Lusamine.Markovify.Benchmarks/Lusamine.Markovify.Benchmarks.csproj" />
 </Solution>

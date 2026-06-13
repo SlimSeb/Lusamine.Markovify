@@ -277,6 +277,100 @@ public sealed class Chain
         return new Chain(model, stateSize);
     }
 
+    /// <summary>
+    /// Writes the transition model to <paramref name="writer"/> in a compact binary form.
+    /// </summary>
+    /// <remarks>
+    /// Words are written once into a deduplicated string table and referenced elsewhere by
+    /// index, so the typical heavy repetition of common words and the <see cref="Begin"/>
+    /// sentinel costs only a small integer per occurrence. Counts and indices use variable
+    /// length encoding. The model is streamed straight to <paramref name="writer"/> and is
+    /// never materialized as a single string, so it handles corpora of any size.
+    /// </remarks>
+    public void WriteBinary(BinaryWriter writer)
+    {
+        // Assign every distinct word a small, stable index. The table is written first so the
+        // reader can resolve indices as it streams through the model.
+        var ids = new Dictionary<string, int>(StringComparer.Ordinal);
+        var strings = new List<string>();
+        foreach (var (state, followers) in _model)
+        {
+            foreach (var word in state.Words)
+                Intern(word);
+            foreach (var word in followers.Keys)
+                Intern(word);
+        }
+
+        writer.Write7BitEncodedInt(StateSize);
+
+        writer.Write7BitEncodedInt(strings.Count);
+        foreach (var word in strings)
+            writer.Write(word);
+
+        writer.Write7BitEncodedInt(_model.Count);
+        foreach (var (state, followers) in _model)
+        {
+            foreach (var word in state.Words)
+                writer.Write7BitEncodedInt(ids[word]);
+
+            writer.Write7BitEncodedInt(followers.Count);
+            foreach (var (word, count) in followers)
+            {
+                writer.Write7BitEncodedInt(ids[word]);
+                writer.Write7BitEncodedInt(count);
+            }
+        }
+
+        return;
+
+        void Intern(string word)
+        {
+            if (ids.ContainsKey(word))
+                return;
+            ids[word] = strings.Count;
+            strings.Add(word);
+        }
+    }
+
+    /// <summary>Reconstructs a chain previously written by <see cref="WriteBinary"/>.</summary>
+    public static Chain ReadBinary(BinaryReader reader)
+    {
+        var stateSize = reader.Read7BitEncodedInt();
+        if (stateSize < 1)
+            throw new InvalidDataException($"Invalid state size {stateSize} in binary chain.");
+
+        var stringCount = reader.Read7BitEncodedInt();
+        if (stringCount < 0)
+            throw new InvalidDataException($"Invalid string table length {stringCount} in binary chain.");
+        var strings = new string[stringCount];
+        for (var i = 0; i < stringCount; i++)
+            strings[i] = reader.ReadString();
+
+        var stateCount = reader.Read7BitEncodedInt();
+        if (stateCount < 0)
+            throw new InvalidDataException($"Invalid state count {stateCount} in binary chain.");
+
+        var model = new Dictionary<State, Dictionary<string, int>>(stateCount);
+        for (var s = 0; s < stateCount; s++)
+        {
+            var words = new string[stateSize];
+            for (var i = 0; i < stateSize; i++)
+                words[i] = strings[reader.Read7BitEncodedInt()];
+
+            var followerCount = reader.Read7BitEncodedInt();
+            var followers = new Dictionary<string, int>(followerCount, StringComparer.Ordinal);
+            for (var i = 0; i < followerCount; i++)
+            {
+                var word = strings[reader.Read7BitEncodedInt()];
+                followers[word] = reader.Read7BitEncodedInt();
+            }
+
+            model[new State(words)] = followers;
+        }
+
+        return new Chain(model, stateSize);
+    }
+
     // bisect.bisect_right: index of the first element strictly greater than value.
     private static int BisectRight(double[] sortedCumulative, double value)
     {

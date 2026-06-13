@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Xunit;
 
@@ -140,6 +141,28 @@ public class ChainTests
         var original = Chain.Build(Corpus("the cat sat", "the dog ran"), stateSize: 2);
 
         var restored = Chain.FromJson(original.ToJson());
+
+        Assert.Equal(original.StateSize, restored.StateSize);
+        Assert.Equal(original.Model.Count, restored.Model.Count);
+        foreach (var (state, followers) in original.Model)
+        {
+            Assert.True(restored.Model.ContainsKey(state));
+            Assert.Equal(followers, restored.Model[state]);
+        }
+    }
+
+    [Fact]
+    public void WriteBinary_ReadBinary_RoundTripsModel()
+    {
+        var original = Chain.Build(Corpus("the cat sat", "the dog ran", "the cat ran"), stateSize: 2);
+
+        using var stream = new MemoryStream();
+        using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+            original.WriteBinary(writer);
+
+        stream.Position = 0;
+        using var reader = new BinaryReader(stream);
+        var restored = Chain.ReadBinary(reader);
 
         Assert.Equal(original.StateSize, restored.StateSize);
         Assert.Equal(original.Model.Count, restored.Model.Count);

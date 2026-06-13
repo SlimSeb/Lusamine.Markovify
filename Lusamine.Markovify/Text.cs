@@ -482,6 +482,113 @@ public class Text
         }
     }
 
+    // Identifies the binary model format and guards against feeding in an unrelated file.
+    // Bytes spell "LMKV"; bumped only if the layout written by WriteBinary changes.
+    private static readonly byte[] BinaryMagic = "LMKV"u8.ToArray();
+    private const byte BinaryVersion = 1;
+
+    /// <summary>
+    /// Writes the model (state size, sampling temperature, and chain) to
+    /// <paramref name="writer"/> in a compact binary form.
+    /// </summary>
+    /// <remarks>
+    /// The binary format is typically several times smaller than the JSON produced by
+    /// <see cref="WriteTo"/> and faster to load, at the cost of not being human readable.
+    /// It is streamed straight to the writer, so it handles models of any size. Prefer
+    /// <see cref="SaveBinary(string)"/> to write directly to a file.
+    /// </remarks>
+    public void WriteBinary(BinaryWriter writer)
+    {
+        writer.Write(BinaryMagic);
+        writer.Write(BinaryVersion);
+        writer.Write(Chain.Temperature);
+        Chain.WriteBinary(writer);
+    }
+
+    /// <summary>Reconstructs a model previously written by <see cref="WriteBinary"/>.</summary>
+    public static Text ReadBinary(BinaryReader reader, Random? rng = null)
+    {
+        var magic = reader.ReadBytes(BinaryMagic.Length);
+        if (!magic.AsSpan().SequenceEqual(BinaryMagic))
+            throw new InvalidDataException("Stream does not contain a binary Markovify model.");
+
+        var version = reader.ReadByte();
+        if (version != BinaryVersion)
+            throw new InvalidDataException($"Unsupported binary model version {version}; expected {BinaryVersion}.");
+
+        var temperature = reader.ReadDouble();
+        var chain = Chain.ReadBinary(reader);
+        chain.Temperature = temperature;
+
+        return new Text(
+            Array.Empty<IReadOnlyList<string>>(),
+            chain.StateSize,
+            retainOriginal: false,
+            rng,
+            chain,
+            sentenceSplitterUsed: true);
+    }
+
+    /// <summary>
+    /// Saves the model to <paramref name="path"/> in the compact binary format,
+    /// overwriting any existing file.
+    /// </summary>
+    /// <remarks>Streams directly to disk, so it handles models too large to hold in a single string.</remarks>
+    public void SaveBinary(string path)
+    {
+        using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream, Encoding.UTF8);
+        WriteBinary(writer);
+    }
+
+    /// <summary>
+    /// Saves the model to <paramref name="path"/> in the compact binary format,
+    /// overwriting any existing file.
+    /// </summary>
+    /// <remarks>Streams directly to disk, so it handles models too large to hold in a single string.</remarks>
+    public async Task SaveBinaryAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var stream = File.Create(path);
+        await using (stream.ConfigureAwait(false))
+        {
+            // BinaryWriter has no async surface, so build the bytes in memory and flush them
+            // asynchronously. The buffer mirrors what SaveBinary writes synchronously.
+            using var buffer = new MemoryStream();
+            using (var writer = new BinaryWriter(buffer, Encoding.UTF8, leaveOpen: true))
+                WriteBinary(writer);
+
+            buffer.Position = 0;
+            await buffer.CopyToAsync(stream, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Loads a model previously written by <see cref="SaveBinary"/>.</summary>
+    /// <remarks>Reads directly from the file, so it handles models too large to hold in a single string.</remarks>
+    public static Text LoadBinary(string path, Random? rng = null)
+    {
+        using var stream = File.OpenRead(path);
+        using var reader = new BinaryReader(stream, Encoding.UTF8);
+        return ReadBinary(reader, rng);
+    }
+
+    /// <summary>Loads a model previously written by <see cref="SaveBinary"/>.</summary>
+    /// <remarks>Reads directly from the file, so it handles models too large to hold in a single string.</remarks>
+    public static async Task<Text> LoadBinaryAsync(string path, Random? rng = null,
+        CancellationToken cancellationToken = default)
+    {
+        var stream = File.OpenRead(path);
+        await using (stream.ConfigureAwait(false))
+        {
+            // BinaryReader is synchronous, so pull the file into memory first, then decode.
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+            buffer.Position = 0;
+
+            using var reader = new BinaryReader(buffer, Encoding.UTF8);
+            return ReadBinary(reader, rng);
+        }
+    }
+
     /// <summary>
     /// Combines several models into one by combining their chains. Retained source
     /// sentences (when present in every model) are concatenated for overlap testing.

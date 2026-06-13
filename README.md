@@ -7,7 +7,7 @@ A [markovify](https://github.com/jsvine/markovify)-style Markov chain text gener
 - **Normalization** : optionally lowercase and strip punctuation before training to merge equivalent tokens.
 - **Constrained generation** : limit by length, word count, or a required opening.
 - **Model combining** : blend several trained models with weights.
-- **JSON serialization** : persist and reload trained models.
+- **JSON and binary serialization** : persist and reload trained models.
 - **Pluggable tokenization** : punctuation-aware sentence splitting, or one-sentence-per-line.
 
 Targets **.NET 10**. No third-party dependencies.
@@ -193,6 +193,35 @@ var reloaded = Text.FromJson(json);
 > reloaded model cannot rejection-test against the source. Call generation
 > methods with `testOutput: false` on reloaded models, or retrain to restore it.
 
+### Binary format
+
+For a more compact, faster-loading file, use the binary format instead of JSON:
+
+```csharp
+model.SaveBinary("model.bin");
+var reloaded = Text.LoadBinary("model.bin");
+
+// Async variants are available too:
+await model.SaveBinaryAsync("model.bin");
+var loaded = await Text.LoadBinaryAsync("model.bin");
+```
+
+The binary format deduplicates words into a string table and uses variable-length
+integers, so it is typically several times smaller than the equivalent JSON. Like
+`Save` / `Load`, it streams straight to and from the file and handles models of any
+size. For full control over the destination, use `WriteBinary` / `ReadBinary` with a
+`BinaryWriter` / `BinaryReader` (both also available on `Chain`):
+
+```csharp
+using var stream = File.Create("model.bin");
+using var writer = new BinaryWriter(stream);
+model.WriteBinary(writer);
+```
+
+The files are not interchangeable with JSON: load a binary file with `LoadBinary`
+(it starts with an `"LMKV"` magic header and is versioned, so loading a non-binary
+or incompatible file throws `InvalidDataException`).
+
 ## Working with the chain directly
 
 `Text` wraps a lower-level `Chain`. You can use it on its own for non-text
@@ -237,9 +266,10 @@ parsed sentences to the protected constructor.
 | `Splitters` | Default sentence- and word-splitting helpers. |
 
 Key `Text` members: `MakeSentence`, `MakeShortSentence`,
-`MakeSentenceWithStart`, `FromSentences`, `Save` / `Load`, `WriteTo`, `ToJson` / `FromJson`,
+`MakeSentenceWithStart`, `FromSentences`, `Save` / `Load`, `SaveBinary` / `LoadBinary`,
+`WriteTo`, `WriteBinary`, `ToJson` / `FromJson`,
 `Combine`, `Chain`, `ParsedSentences`. Key `Chain` members: `Build`, `Walk`, `Combine`,
-`Temperature`, `WriteTo`, `ToJson` / `FromJson`.
+`Temperature`, `WriteTo`, `WriteBinary` / `ReadBinary`, `ToJson` / `FromJson`.
 
 ## Project layout
 

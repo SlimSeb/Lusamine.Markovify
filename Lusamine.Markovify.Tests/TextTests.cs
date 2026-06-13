@@ -167,6 +167,85 @@ public class TextTests
     }
 
     [Fact]
+    public void SaveBinary_LoadBinary_RoundTripsThroughAFile()
+    {
+        var model = new Text(Corpus, stateSize: 2, rng: new Random(8), temperature: 1.5);
+        var path = Path.Combine(Path.GetTempPath(), $"markovify-{Guid.NewGuid():N}.bin");
+
+        try
+        {
+            model.SaveBinary(path);
+            var restored = Text.LoadBinary(path, new Random(8));
+
+            Assert.Equal(model.StateSize, restored.StateSize);
+            Assert.Equal(model.Chain.Temperature, restored.Chain.Temperature);
+            Assert.Equal(model.Chain.Model.Count, restored.Chain.Model.Count);
+            Assert.NotNull(restored.MakeSentence(testOutput: false));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task SaveBinaryAsync_LoadBinaryAsync_RoundTripsThroughAFile()
+    {
+        var model = new Text(Corpus, stateSize: 2, rng: new Random(8), temperature: 1.3);
+        var path = Path.Combine(Path.GetTempPath(), $"markovify-{Guid.NewGuid():N}.bin");
+
+        try
+        {
+            await model.SaveBinaryAsync(path);
+            var restored = await Text.LoadBinaryAsync(path, new Random(8));
+
+            Assert.Equal(model.StateSize, restored.StateSize);
+            Assert.Equal(model.Chain.Temperature, restored.Chain.Temperature);
+            Assert.NotNull(restored.MakeSentence(testOutput: false));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void SaveBinary_IsSmallerThanJson()
+    {
+        var model = new Text(Corpus, stateSize: 2, rng: new Random(8));
+        var path = Path.Combine(Path.GetTempPath(), $"markovify-{Guid.NewGuid():N}.bin");
+
+        try
+        {
+            model.SaveBinary(path);
+            var binarySize = new FileInfo(path).Length;
+            var jsonSize = System.Text.Encoding.UTF8.GetByteCount(model.ToJson());
+
+            Assert.True(binarySize < jsonSize, $"Expected binary ({binarySize}) < JSON ({jsonSize}).");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void LoadBinary_RejectsNonMarkovifyData()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"markovify-{Guid.NewGuid():N}.bin");
+        File.WriteAllBytes(path, [0x00, 0x01, 0x02, 0x03, 0x04]);
+
+        try
+        {
+            Assert.Throws<InvalidDataException>(() => Text.LoadBinary(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void RetainedSource_IsChunkedAndStillDetectsOverlapAcrossBoundaries()
     {
         // Force tiny chunks so the retained source is split into many pieces, then confirm
