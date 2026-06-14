@@ -230,6 +230,71 @@ public class TextTests
     }
 
     [Fact]
+    public void SaveMapped_OpenMapped_GeneratesKnownVocabulary()
+    {
+        var model = new Text(Corpus, stateSize: 2, temperature: 1.4);
+        var vocabulary = Corpus
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .ToHashSet();
+        var path = Path.Combine(Path.GetTempPath(), $"markovify-{Guid.NewGuid():N}.mmf");
+
+        try
+        {
+            model.SaveMapped(path);
+            using var mapped = Text.OpenMapped(path);
+
+            Assert.Equal(model.StateSize, mapped.StateSize);
+            Assert.Equal(model.Chain.Temperature, mapped.Temperature);
+
+            var sentence = mapped.MakeSentence(rng: new Random(3));
+            Assert.NotNull(sentence);
+            foreach (var word in sentence!.Split(' '))
+                Assert.Contains(word, vocabulary);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void SaveMapped_OpenMapped_MatchesInMemoryWalk()
+    {
+        // With a single-path corpus the only possible walk is deterministic, so the mapped
+        // model must reproduce exactly what the in-memory chain produces.
+        var model = new Text("the quick brown fox jumps.", stateSize: 2);
+        var path = Path.Combine(Path.GetTempPath(), $"markovify-{Guid.NewGuid():N}.mmf");
+
+        try
+        {
+            model.SaveMapped(path);
+            using var mapped = Text.OpenMapped(path);
+
+            Assert.Equal("the quick brown fox jumps.", mapped.MakeSentence(rng: new Random(11)));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void OpenMapped_RejectsNonMappedData()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"markovify-{Guid.NewGuid():N}.mmf");
+        File.WriteAllBytes(path, new byte[128]);
+
+        try
+        {
+            Assert.Throws<InvalidDataException>(() => Text.OpenMapped(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void LoadBinary_RejectsNonMarkovifyData()
     {
         var path = Path.Combine(Path.GetTempPath(), $"markovify-{Guid.NewGuid():N}.bin");

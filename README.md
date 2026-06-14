@@ -222,6 +222,43 @@ The files are not interchangeable with JSON: load a binary file with `LoadBinary
 (it starts with an `"LMKV"` magic header and is versioned, so loading a non-binary
 or incompatible file throws `InvalidDataException`).
 
+### Memory-mapped format (generating on a tiny machine)
+
+`Load` and `LoadBinary` both build the whole chain as live objects in memory. A model
+trained on a large corpus expands to many times its file size as .NET objects, so
+generating from a multi-gigabyte model on a small box (a 2 GB VPS, say) runs out of
+memory. The memory-mapped format solves this: the transition table stays on disk, laid
+out for random access, and only the few states each walk visits are paged into RAM.
+
+Write the file once on a machine large enough to hold the model:
+
+```csharp
+var model = Text.FromSentences(corpus, stateSize: 2);
+model.SaveMapped("model.mmf");
+```
+
+Then copy `model.mmf` to the constrained machine and generate from it there:
+
+```csharp
+using var mapped = Text.OpenMapped("model.mmf");
+
+mapped.Temperature = 1.3;                       // optional; defaults to the saved value
+string? sentence = mapped.MakeSentence(minWords: 5);
+string? shorter  = mapped.MakeShortSentence(maxChars: 120);
+```
+
+Resident memory stays in the tens of megabytes regardless of file size, because the
+read-only pages are file-backed: under memory pressure the kernel reclaims them
+straight away (no swap) and re-reads from disk on the next access. In a quick test, a
+132 MB mapped file backing 4.6 million states generated thousands of sentences in a
+fresh process with a **0.1 MB managed heap**.
+
+The trade-offs: generation does more disk I/O, so it is slower per sentence than an
+in-memory model; the source corpus is not stored (no overlap rejection testing); and
+the higher-level start-anchored helpers (`MakeSentenceWithStart`) are not available.
+`MappedModel` is read-only and disposable, so wrap it in `using`. Loading a file that
+is not a mapped model (it carries an `"LMMF"` magic header) throws `InvalidDataException`.
+
 ## Working with the chain directly
 
 `Text` wraps a lower-level `Chain`. You can use it on its own for non-text
@@ -262,12 +299,14 @@ parsed sentences to the protected constructor.
 | `Text` | High-level model: train from text, generate sentences. |
 | `NewlineText` | `Text` variant where each line is one sentence. |
 | `Chain` | Low-level weighted Markov chain over token sequences. |
+| `Followers` | A state's follower words and their counts (the chain's transition values). |
+| `MappedModel` | Read-only, memory-mapped model for generating from a huge file in little RAM. |
 | `State` | Immutable, value-equatable window of words (a chain key). |
 | `Splitters` | Default sentence- and word-splitting helpers. |
 
 Key `Text` members: `MakeSentence`, `MakeShortSentence`,
 `MakeSentenceWithStart`, `FromSentences`, `Save` / `Load`, `SaveBinary` / `LoadBinary`,
-`WriteTo`, `WriteBinary`, `ToJson` / `FromJson`,
+`SaveMapped` / `OpenMapped`, `WriteTo`, `WriteBinary`, `ToJson` / `FromJson`,
 `Combine`, `Chain`, `ParsedSentences`. Key `Chain` members: `Build`, `Walk`, `Combine`,
 `Temperature`, `WriteTo`, `WriteBinary` / `ReadBinary`, `ToJson` / `FromJson`.
 

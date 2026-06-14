@@ -10,8 +10,8 @@
 
     <PropertyGroup>
         <PackageId>Lusamine.Markovify</PackageId>
-        <Version>1.6.1</Version>
-        <Description>A markovify-style Markov chain text generator for .NET. Train a model from a text corpus and generate new sentences, with weighted sampling, rejection sampling to avoid verbatim reproduction, model combining, and JSON or binary serialization.</Description>
+        <Version>1.7.0</Version>
+        <Description>A markovify-style Markov chain text generator for .NET. Train a model from a text corpus and generate new sentences, with weighted sampling, rejection sampling to avoid verbatim reproduction, model combining, JSON or binary serialization, and a memory-mapped format for generating from huge models in little RAM.</Description>
         <PackageTags>markov;markov-chain;text-generation;nlp;markovify</PackageTags>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
         <PackageReadmeFile>README.md</PackageReadmeFile>

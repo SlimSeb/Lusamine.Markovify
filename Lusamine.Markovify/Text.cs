@@ -571,6 +571,25 @@ public class Text
         return ReadBinary(reader, rng);
     }
 
+    /// <summary>
+    /// Saves the model to <paramref name="path"/> in the memory-mapped format, overwriting
+    /// any existing file. Open it on a memory-constrained machine with
+    /// <see cref="OpenMapped"/> (or <see cref="MappedModel.Open"/>).
+    /// </summary>
+    /// <remarks>
+    /// Run this where the model fits in memory. The resulting file keeps the transition
+    /// table on disk and laid out for random access, so the reader never loads the whole
+    /// chain into RAM. See <see cref="MappedModel"/>.
+    /// </remarks>
+    public void SaveMapped(string path) => MappedModel.Write(Chain, Chain.Temperature, path);
+
+    /// <summary>
+    /// Opens a memory-mapped model previously written by <see cref="SaveMapped"/>. The
+    /// returned <see cref="MappedModel"/> generates without loading the whole chain into
+    /// memory; dispose it when done.
+    /// </summary>
+    public static MappedModel OpenMapped(string path) => MappedModel.Open(path);
+
     /// <summary>Loads a model previously written by <see cref="SaveBinary"/>.</summary>
     /// <remarks>Reads directly from the file, so it handles models too large to hold in a single string.</remarks>
     public static async Task<Text> LoadBinaryAsync(string path, Random? rng = null,

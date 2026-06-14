@@ -16,7 +16,7 @@ public sealed class Chain
     /// <summary>Sentinel token marking the end of a run.</summary>
     public const string End = "___END__";
 
-    private readonly Dictionary<State, Dictionary<string, int>> _model;
+    private readonly Dictionary<State, Followers> _model;
 
     // Lazily-built sampling tables: state -> (followers, cumulative weights).
     private readonly Dictionary<State, (string[] Choices, double[] CumDist)> _cache = new();
@@ -49,12 +49,39 @@ public sealed class Chain
     }
 
     /// <summary>The raw transition model: state -> (follower -> count).</summary>
-    public IReadOnlyDictionary<State, Dictionary<string, int>> Model => _model;
+    public IReadOnlyDictionary<State, Followers> Model => _model;
 
-    private Chain(Dictionary<State, Dictionary<string, int>> model, int stateSize)
+    private Chain(Dictionary<State, Followers> model, int stateSize)
     {
         _model = model;
         StateSize = stateSize;
+    }
+
+    // Converts a mutable count map (used only while accumulating) into the compact
+    // array-backed model. The source is drained as it goes so the bulky per-state
+    // dictionaries are released for collection rather than coexisting with the result.
+    private static Dictionary<State, Followers> Compact(Dictionary<State, Dictionary<string, int>> counts)
+    {
+        var model = new Dictionary<State, Followers>(counts.Count);
+        foreach (var state in counts.Keys.ToArray())
+        {
+            var followers = counts[state];
+            counts.Remove(state);
+
+            var words = new string[followers.Count];
+            var weights = new int[followers.Count];
+            var index = 0;
+            foreach (var (word, count) in followers)
+            {
+                words[index] = word;
+                weights[index] = count;
+                index++;
+            }
+
+            model[state] = new Followers(words, weights);
+        }
+
+        return model;
     }
 
     /// <summary>
@@ -95,7 +122,7 @@ public sealed class Chain
             }
         }
 
-        return new Chain(model, stateSize);
+        return new Chain(Compact(model), stateSize);
     }
 
     /// <summary>The all-<see cref="Begin"/> state from which walks start by default.</summary>
@@ -118,18 +145,18 @@ public sealed class Chain
             if (!_model.TryGetValue(state, out var followers))
                 throw new KeyNotFoundException($"State {state} is not present in the model.");
 
-            var choices = new string[followers.Count];
-            var cumDist = new double[followers.Count];
+            var words = followers.WordsArray;
+            var counts = followers.CountsArray;
+            var choices = new string[words.Length];
+            var cumDist = new double[words.Length];
             var sum = 0.0;
-            var index = 0;
-            foreach (var (word, count) in followers)
+            for (var index = 0; index < words.Length; index++)
             {
-                choices[index] = word;
+                choices[index] = words[index];
                 // At T == 1 the weight is exactly the observed count; otherwise it is
                 // count^(1/T), which flattens (T > 1) or sharpens (T < 1) the distribution.
-                sum += _temperature.Equals(1.0) ? count : Math.Pow(count, 1.0 / _temperature);
+                sum += _temperature.Equals(1.0) ? counts[index] : Math.Pow(counts[index], 1.0 / _temperature);
                 cumDist[index] = sum;
-                index++;
             }
 
             entry = (choices, cumDist);
@@ -189,17 +216,19 @@ public sealed class Chain
                     merged[state] = target;
                 }
 
-                foreach (var (word, count) in followers)
+                var words = followers.WordsArray;
+                var counts = followers.CountsArray;
+                for (var j = 0; j < words.Length; j++)
                 {
-                    var scaled = (int)Math.Round(count * weight);
+                    var scaled = (int)Math.Round(counts[j] * weight);
                     if (scaled <= 0)
                         continue;
-                    target[word] = target.GetValueOrDefault(word) + scaled;
+                    target[words[j]] = target.GetValueOrDefault(words[j]) + scaled;
                 }
             }
         }
 
-        return new Chain(merged, stateSize);
+        return new Chain(Compact(merged), stateSize);
     }
 
     /// <summary>
@@ -222,17 +251,43 @@ public sealed class Chain
 
         var removed = 0;
         var emptyStates = new List<State>();
-        foreach (var (state, followers) in _model)
+        // Snapshot the keys because surviving states are reassigned while iterating.
+        foreach (var state in _model.Keys.ToArray())
         {
-            var rare = followers.Where(pair => pair.Value < minCount).Select(pair => pair.Key).ToList();
-            foreach (var word in rare)
+            var words = _model[state].WordsArray;
+            var counts = _model[state].CountsArray;
+
+            var keep = 0;
+            foreach (var count in counts)
             {
-                followers.Remove(word);
-                removed++;
+                if (count >= minCount)
+                    keep++;
             }
 
-            if (followers.Count == 0)
+            if (keep == counts.Length)
+                continue;
+
+            removed += counts.Length - keep;
+
+            if (keep == 0)
+            {
                 emptyStates.Add(state);
+                continue;
+            }
+
+            var newWords = new string[keep];
+            var newCounts = new int[keep];
+            var index = 0;
+            for (var i = 0; i < counts.Length; i++)
+            {
+                if (counts[i] < minCount)
+                    continue;
+                newWords[index] = words[i];
+                newCounts[index] = counts[i];
+                index++;
+            }
+
+            _model[state] = new Followers(newWords, newCounts);
         }
 
         foreach (var state in emptyStates)
@@ -273,8 +328,10 @@ public sealed class Chain
             writer.WriteEndArray();
 
             writer.WriteStartObject();
-            foreach (var (word, count) in followers)
-                writer.WriteNumber(word, count);
+            var words = followers.WordsArray;
+            var counts = followers.CountsArray;
+            for (var i = 0; i < words.Length; i++)
+                writer.WriteNumber(words[i], counts[i]);
             writer.WriteEndObject();
 
             writer.WriteEndArray();
@@ -292,7 +349,7 @@ public sealed class Chain
     /// <summary>Reconstructs a chain from an already-parsed JSON array element.</summary>
     public static Chain FromElement(JsonElement root)
     {
-        var model = new Dictionary<State, Dictionary<string, int>>();
+        var model = new Dictionary<State, Followers>();
         var stateSize = -1;
 
         foreach (var pair in root.EnumerateArray())
@@ -306,11 +363,24 @@ public sealed class Chain
             if (stateSize == -1)
                 stateSize = words.Length;
 
-            var followers = new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (var follower in pair[1].EnumerateObject())
-                followers[follower.Name] = follower.Value.GetInt32();
+            // Build the follower arrays directly instead of a transient per-state
+            // dictionary, keeping the loaded model compact in memory.
+            var followerElement = pair[1];
+            var followerCount = 0;
+            foreach (var _ in followerElement.EnumerateObject())
+                followerCount++;
 
-            model[new State(words)] = followers;
+            var followerWords = new string[followerCount];
+            var followerCounts = new int[followerCount];
+            var f = 0;
+            foreach (var follower in followerElement.EnumerateObject())
+            {
+                followerWords[f] = follower.Name;
+                followerCounts[f] = follower.Value.GetInt32();
+                f++;
+            }
+
+            model[new State(words)] = new Followers(followerWords, followerCounts);
         }
 
         if (stateSize == -1)
@@ -339,7 +409,7 @@ public sealed class Chain
         {
             foreach (var word in state.Words)
                 Intern(word);
-            foreach (var word in followers.Keys)
+            foreach (var word in followers.WordsArray)
                 Intern(word);
         }
 
@@ -355,11 +425,13 @@ public sealed class Chain
             foreach (var word in state.Words)
                 writer.Write7BitEncodedInt(ids[word]);
 
-            writer.Write7BitEncodedInt(followers.Count);
-            foreach (var (word, count) in followers)
+            var words = followers.WordsArray;
+            var counts = followers.CountsArray;
+            writer.Write7BitEncodedInt(words.Length);
+            for (var i = 0; i < words.Length; i++)
             {
-                writer.Write7BitEncodedInt(ids[word]);
-                writer.Write7BitEncodedInt(count);
+                writer.Write7BitEncodedInt(ids[words[i]]);
+                writer.Write7BitEncodedInt(counts[i]);
             }
         }
 
@@ -392,22 +464,27 @@ public sealed class Chain
         if (stateCount < 0)
             throw new InvalidDataException($"Invalid state count {stateCount} in binary chain.");
 
-        var model = new Dictionary<State, Dictionary<string, int>>(stateCount);
+        var model = new Dictionary<State, Followers>(stateCount);
         for (var s = 0; s < stateCount; s++)
         {
             var words = new string[stateSize];
             for (var i = 0; i < stateSize; i++)
                 words[i] = strings[reader.Read7BitEncodedInt()];
 
+            // Read straight into the compact follower arrays: no transient per-state
+            // dictionary, which is what keeps loading a multi-gigabyte model in bounds.
             var followerCount = reader.Read7BitEncodedInt();
-            var followers = new Dictionary<string, int>(followerCount, StringComparer.Ordinal);
+            if (followerCount < 0)
+                throw new InvalidDataException($"Invalid follower count {followerCount} in binary chain.");
+            var followerWords = new string[followerCount];
+            var followerCounts = new int[followerCount];
             for (var i = 0; i < followerCount; i++)
             {
-                var word = strings[reader.Read7BitEncodedInt()];
-                followers[word] = reader.Read7BitEncodedInt();
+                followerWords[i] = strings[reader.Read7BitEncodedInt()];
+                followerCounts[i] = reader.Read7BitEncodedInt();
             }
 
-            model[new State(words)] = followers;
+            model[new State(words)] = new Followers(followerWords, followerCounts);
         }
 
         return new Chain(model, stateSize);
